@@ -94,6 +94,7 @@ uvicorn main:app --reload --port 8000
 Or from `suit-up-web`:
 
 ```bash
+npm install
 cd suit-up-web
 npm run backend
 ```
@@ -142,3 +143,4 @@ SuitUp is that: a brutally honest mentor in your laptop, but friendly. More Barn
 Built for hackathon demo. Use and extend as you like.
 
 **Suit up.**
+**Team SAAS**
