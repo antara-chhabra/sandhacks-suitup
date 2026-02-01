@@ -1,31 +1,46 @@
 import React, { useState } from "react";
 
-const ResumeUpload = ({ onUpload }) => {
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [uploadStatus, setUploadStatus] = useState("");
+function ResumeUpload() {
+  const [file, setFile] = useState(null);
+  const [status, setStatus] = useState("");
 
-  const handleFileChange = (e) => {
-    setSelectedFile(e.target.files[0]);
-  };
-
-  const handleUpload = () => {
-    if (!selectedFile) {
-      setUploadStatus("Please select a file first.");
+  const handleUpload = async () => {
+    if (!file) {
+      setStatus("Please select a resume");
       return;
     }
-    console.log("File ready for upload:", selectedFile);
-    setUploadStatus("File ready for upload!");
-    onUpload && onUpload(selectedFile);
+
+    const formData = new FormData();
+    formData.append("resume", file);
+
+    try {
+      setStatus("Uploading...");
+      const response = await fetch("http://localhost:5000/upload-resume", {
+        method: "POST",
+        body: formData
+      });
+
+      const data = await response.json();
+      setStatus(data.message);
+    } catch (err) {
+      console.error(err);
+      setStatus("Upload failed");
+    }
   };
 
   return (
     <div>
-      <h2>Upload Your Resume</h2>
-      <input type="file" accept=".pdf,.doc,.docx" onChange={handleFileChange} />
-      <button onClick={handleUpload}>Upload</button>
-      <p>{uploadStatus}</p>
+      <h2>Resume Upload</h2>
+      <input
+        type="file"
+        accept=".pdf,.doc,.docx"
+        onChange={(e) => setFile(e.target.files[0])}
+      />
+      <br /><br />
+      <button onClick={handleUpload}>Upload Resume</button>
+      <p>{status}</p>
     </div>
   );
-};
+}
 
 export default ResumeUpload;
