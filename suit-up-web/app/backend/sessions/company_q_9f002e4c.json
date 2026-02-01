@@ -1,0 +1,16 @@
+{
+  "company_values": [
+    "How we hire",
+    "Tech dev guide by Google",
+    "Steve's blog"
+  ],
+  "technical_questions": [
+    "Algorithms & Data structure",
+    "System design and architecture",
+    "Operating systems and programming concepts"
+  ],
+  "behavioral_questions": [
+    "How can I get my resume shortlisted by Google",
+    "MIT hacking a google interview"
+  ]
+}

@@ -67,11 +67,16 @@ export default function UploadPage() {
       // Store the Llama-generated questions in localStorage for the interview session
       localStorage.setItem("interview_questions", JSON.stringify(data.questions));
       
-      // Proceed to the setup page
-      router.push('/interview_setup');
+      // Proceed to company/position page
+      router.push('/company_position');
     } catch (error) {
       console.error("AI Error:", error);
-      alert("Llama had trouble reading your resume. Is the backend running?");
+      const msg = error instanceof Error ? error.message : String(error);
+      alert(
+        msg.includes("fetch") || msg.includes("Network")
+          ? "Backend offline. Run: cd suit-up-web && npm run backend"
+          : "Resume processing failed. Is the backend running on port 8000?"
+      );
     } finally {
       setIsUploading(false);
     }

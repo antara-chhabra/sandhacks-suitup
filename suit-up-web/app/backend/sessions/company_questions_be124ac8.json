@@ -1,0 +1,44 @@
+{
+  "company": "Google",
+  "position": "software engineer",
+  "company_values": [
+    "Protecting users",
+    "Safety Center",
+    "Your Account",
+    "Explore our Transparency Center to understand our policies",
+    "Why we focus on AI (and to what end)",
+    "Our AI Principles",
+    "Safety and responsibility"
+  ],
+  "technical_questions": [
+    "Algorithmic complexity / Big-O / Asymptotic analysis",
+    "Data Structures",
+    "Trees - Binary search trees: BSTs",
+    "Heap / Priority Queue / Binary Heap",
+    "Sorting - selection, insertion, heapsort, quicksort, merge sort",
+    "Graphs - directed, undirected, adjacency matrix, adjacency list, traversals: BFS, DFS",
+    "EVEN MORE KNOWLEDGE (System Design, Scalability, Data Handling if 4+ years experience)",
+    "DYNAMIC PROGRAMMING",
+    "CMPILERS",
+    "Floating Point Numbers",
+    "Unicode",
+    "Endianness",
+    "Emacs and vi(m)",
+    "Unix command line tools",
+    "Information theory",
+    "Parity & Hamming Code",
+    "Entropy",
+    "Cryptography",
+    "Compression",
+    "Networking (if you have networking experience or want to be a systems engineer, expect questions)",
+    "Computer Security",
+    "Garbage collection",
+    "Parallel Programming",
+    "Messaging, Serialization, and Queueing Systems"
+  ],
+  "behavioral_questions": [
+    "Don't feel you aren't smart enough",
+    "What's your favorite language?",
+    "What do you think about Google's company values?"
+  ]
+}

@@ -2,9 +2,17 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Camera, Mic, CheckCircle, AlertCircle, ArrowRight, Loader2 } from 'lucide-react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 
 export default function InterviewSetupPage() {
+  const router = useRouter();
   const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    if (!localStorage.getItem("company_questions")) {
+      router.replace("/company_position");
+    }
+  }, [router]);
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
   const [hasMicPermission, setHasMicPermission] = useState<boolean | null>(null);
   const [isChecking, setIsChecking] = useState(true);
