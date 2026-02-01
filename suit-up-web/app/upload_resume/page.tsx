@@ -1,11 +1,13 @@
 "use client";
 import React, { useState, useRef } from "react";
-import { Upload, CheckCircle, ArrowRight } from "lucide-react";
-import Link from "next/link";
+import { Upload, CheckCircle, ArrowRight, Loader2 } from "lucide-react"; // Added Loader2 for the 'Analyzing' state
+import { useRouter } from "next/navigation"; // Added for manual navigation
 
 export default function UploadPage() {
+  const router = useRouter(); // Initialize router
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [isUploading, setIsUploading] = useState(false); // New state to track backend processing
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -36,6 +38,42 @@ export default function UploadPage() {
       setFile(uploadedFile);
     } else {
       alert("Please upload a PDF file.");
+    }
+  };
+
+  /**
+   * NEW LOGIC: This sends the PDF to your Python backend (Llama)
+   * and saves the questions before moving to the next page.
+   */
+  const handleChallengeAccepted = async () => {
+    if (!file) return;
+
+    setIsUploading(true);
+    
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+        // Connects to your FastAPI backend on port 8000
+        const response = await fetch("http://localhost:8000/process-resume", {
+  method: "POST",
+  body: formData,
+      });
+
+      if (!response.ok) throw new Error("Processing failed");
+
+      const data = await response.json();
+
+      // Store the Llama-generated questions in localStorage for the interview session
+      localStorage.setItem("interview_questions", JSON.stringify(data.questions));
+      
+      // Proceed to the setup page
+      router.push('/interview_setup');
+    } catch (error) {
+      console.error("AI Error:", error);
+      alert("Llama had trouble reading your resume. Is the backend running?");
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -109,17 +147,22 @@ export default function UploadPage() {
           )}
         </div>
 
-        {/* Action Button */}
+        {/* Action Button: Changed from Link to Button to trigger backend logic */}
         <div className={`mt-10 transition-all duration-500 ${file ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'}`}>
-            <Link 
-                href="/interview_setup" 
-                className="group relative inline-flex items-center justify-center px-8 py-4 overflow-hidden font-medium tracking-tighter text-white bg-transparent border border-gold-500 rounded-none cursor-pointer"
+            <button 
+                onClick={handleChallengeAccepted}
+                disabled={isUploading}
+                className="group relative inline-flex items-center justify-center px-8 py-4 overflow-hidden font-medium tracking-tighter text-white bg-transparent border border-gold-500 rounded-none cursor-pointer disabled:opacity-50"
             >
-            <span className="absolute w-0 h-0 transition-all duration-500 ease-out bg-gold-500 rounded-full group-hover:w-80 group-hover:h-56"></span>
-            <span className="relative flex items-center gap-3 font-bold tracking-[0.2em] uppercase text-sm group-hover:text-navy-900 transition-colors">
-                Proceed to Booth <ArrowRight className="w-4 h-4" />
-            </span>
-            </Link>
+              <span className="absolute w-0 h-0 transition-all duration-500 ease-out bg-gold-500 rounded-full group-hover:w-80 group-hover:h-56"></span>
+              <span className="relative flex items-center gap-3 font-bold tracking-[0.2em] uppercase text-sm group-hover:text-navy-900 transition-colors">
+                  {isUploading ? (
+                    <>Analyzing Systems... <Loader2 className="w-4 h-4 animate-spin" /></>
+                  ) : (
+                    <>Challenge Accepted <ArrowRight className="w-4 h-4" /></>
+                  )}
+              </span>
+            </button>
         </div>
 
       </div>
