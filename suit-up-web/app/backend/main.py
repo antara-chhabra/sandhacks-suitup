@@ -3,6 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 import os
 import shutil
 
+import os
+os.makedirs("uploads", exist_ok=True)
+
 app = FastAPI()
 
 # Enable CORS so your React app can talk to this server
