@@ -1,0 +1,36 @@
+INTERVIEW PERFORMANCE REPORT
+============================================================
+
+Overall Score: 87.3/100
+Duration: 91.8 seconds
+Frames Analyzed: 1023
+
+------------------------------------------------------------
+EYE CONTACT ANALYSIS
+------------------------------------------------------------
+Percentage: 89.4%
+Score: 100.0/100
+
+------------------------------------------------------------
+EMOTION ANALYSIS
+------------------------------------------------------------
+Most Common: Neutral
+Positive: 45.1%
+Negative: 5.2%
+Neutral: 49.7%
+
+------------------------------------------------------------
+RECOMMENDATIONS
+------------------------------------------------------------
+
+1. [LOW] Eye Contact
+   Excellent eye contact! Keep it up.
+   Tip: Continue this natural eye contact in real interviews.
+
+2. [LOW] Engagement
+   You nod frequently - ensure it appears natural and not excessive.
+   Tip: Nod at key moments, not continuously.
+
+3. [LOW] Overall
+   Great performance! You demonstrate strong body language skills.
+   Tip: Keep practicing to maintain these excellent habits.
