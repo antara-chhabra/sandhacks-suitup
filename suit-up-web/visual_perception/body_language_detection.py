@@ -1,23 +1,20 @@
 """
 Body Language Detection System for Interview Preparation
 Analyzes facial expressions, emotions, head movements, and eye contact
+NO MEDIAPIPE REQUIRED - Uses OpenCV only
 """
 
 import cv2
 import numpy as np
 import pandas as pd
-import mediapipe as mp
 from collections import deque
 import time
 from datetime import datetime
 import os
 
-# Try to import tensorflow/keras, provide installation instructions if missing
+# Try to import tensorflow/keras
 try:
-    from tensorflow.keras.models import Sequential, load_model
-    from tensorflow.keras.layers import Dense, Dropout, Flatten, Conv2D, MaxPooling2D
-    from tensorflow.keras.preprocessing.image import ImageDataGenerator
-    from tensorflow.keras.optimizers import Adam
+    from tensorflow.keras.models import load_model
 except ImportError:
     print("TensorFlow not found. Install with: pip install tensorflow")
     exit(1)
@@ -27,7 +24,8 @@ class EmotionRecognizer:
     """Handles emotion recognition from facial images"""
 
     def __init__(self, model_path=None):
-        self.emotion_labels = ['Angry', 'Contempt', 'Disgust', 'Fear', 'Happy',
+        # Updated to match actual dataset classes (7 emotions)
+        self.emotion_labels = ['Angry', 'Disgust', 'Fear', 'Happy',
                                'Neutral', 'Sad', 'Surprise']
         self.model = None
         self.model_path = model_path
@@ -35,92 +33,7 @@ class EmotionRecognizer:
         if model_path and os.path.exists(model_path):
             self.load_model(model_path)
         else:
-            print("No pre-trained model found. You'll need to train the model first.")
-
-    def create_model(self):
-        """Create CNN model for emotion recognition"""
-        model = Sequential([
-            Conv2D(32, (3, 3), activation='relu', input_shape=(48, 48, 1)),
-            MaxPooling2D((2, 2)),
-            Dropout(0.25),
-
-            Conv2D(64, (3, 3), activation='relu'),
-            MaxPooling2D((2, 2)),
-            Dropout(0.25),
-
-            Conv2D(128, (3, 3), activation='relu'),
-            MaxPooling2D((2, 2)),
-            Dropout(0.25),
-
-            Flatten(),
-            Dense(128, activation='relu'),
-            Dropout(0.5),
-            Dense(len(self.emotion_labels), activation='softmax')
-        ])
-
-        model.compile(optimizer=Adam(learning_rate=0.0001),
-                      loss='categorical_crossentropy',
-                      metrics=['accuracy'])
-
-        return model
-
-    def train_model(self, train_dir, test_dir, epochs=50, batch_size=64):
-        """
-        Train the emotion recognition model
-
-        Args:
-            train_dir: Path to training data directory
-            test_dir: Path to testing data directory
-            epochs: Number of training epochs
-            batch_size: Batch size for training
-        """
-        print("Creating model...")
-        self.model = self.create_model()
-
-        # Data augmentation
-        train_datagen = ImageDataGenerator(
-            rescale=1. / 255,
-            rotation_range=10,
-            width_shift_range=0.1,
-            height_shift_range=0.1,
-            horizontal_flip=True,
-            zoom_range=0.1
-        )
-
-        test_datagen = ImageDataGenerator(rescale=1. / 255)
-
-        print("Loading training data...")
-        train_generator = train_datagen.flow_from_directory(
-            train_dir,
-            target_size=(48, 48),
-            batch_size=batch_size,
-            color_mode='grayscale',
-            class_mode='categorical'
-        )
-
-        print("Loading validation data...")
-        test_generator = test_datagen.flow_from_directory(
-            test_dir,
-            target_size=(48, 48),
-            batch_size=batch_size,
-            color_mode='grayscale',
-            class_mode='categorical'
-        )
-
-        print(f"Training model for {epochs} epochs...")
-        history = self.model.fit(
-            train_generator,
-            epochs=epochs,
-            validation_data=test_generator,
-            verbose=1
-        )
-
-        # Save the model
-        model_path = 'emotion_model.h5'
-        self.model.save(model_path)
-        print(f"Model saved to {model_path}")
-
-        return history
+            print("No pre-trained model found at:", model_path)
 
     def load_model(self, model_path):
         """Load pre-trained model"""
@@ -155,108 +68,104 @@ class EmotionRecognizer:
 
 
 class HeadPoseEstimator:
-    """Estimates head pose and detects nodding"""
+    """Estimates head pose and detects nodding using OpenCV only"""
 
     def __init__(self):
-        self.mp_face_mesh = mp.solutions.face_mesh
-        self.face_mesh = self.mp_face_mesh.FaceMesh(
-            max_num_faces=1,
-            refine_landmarks=True,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5
+        # Load face landmark detector
+        self.face_cascade = cv2.CascadeClassifier(
+            cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+        )
+        self.eye_cascade = cv2.CascadeClassifier(
+            cv2.data.haarcascades + 'haarcascade_eye.xml'
         )
 
         # Store head positions for nodding detection
-        self.head_positions = deque(maxlen=30)  # Store last 30 frames
-        self.nod_threshold = 15  # Degrees of movement to count as nod
+        self.head_positions = deque(maxlen=30)
+        self.nod_threshold = 20  # Pixels of movement to count as nod
         self.last_nod_time = 0
-        self.nod_cooldown = 1.0  # Seconds between nods
+        self.nod_cooldown = 1.0
 
-    def estimate_head_pose(self, frame, face_landmarks):
+        # Store previous face position
+        self.prev_face_y = None
+
+    def estimate_head_pose_simple(self, frame, face_rect):
         """
-        Estimate head pose angles (pitch, yaw, roll)
+        Estimate head pose using simple geometric approach
+
+        Args:
+            frame: BGR image
+            face_rect: (x, y, w, h) of detected face
 
         Returns:
-            tuple: (pitch, yaw, roll) in degrees
+            tuple: (pitch, yaw, roll) in degrees (approximations)
         """
-        img_h, img_w = frame.shape[:2]
+        x, y, w, h = face_rect
 
-        # 3D model points (generic face model)
-        model_points = np.array([
-            (0.0, 0.0, 0.0),  # Nose tip
-            (0.0, -330.0, -65.0),  # Chin
-            (-225.0, 170.0, -135.0),  # Left eye left corner
-            (225.0, 170.0, -135.0),  # Right eye right corner
-            (-150.0, -150.0, -125.0),  # Left mouth corner
-            (150.0, -150.0, -125.0)  # Right mouth corner
-        ])
+        # Extract face ROI
+        face_roi = frame[y:y+h, x:x+w]
+        gray_face = cv2.cvtColor(face_roi, cv2.COLOR_BGR2GRAY)
 
-        # 2D image points from landmarks
-        landmarks = face_landmarks.landmark
-        image_points = np.array([
-            (landmarks[1].x * img_w, landmarks[1].y * img_h),  # Nose tip
-            (landmarks[152].x * img_w, landmarks[152].y * img_h),  # Chin
-            (landmarks[33].x * img_w, landmarks[33].y * img_h),  # Left eye left corner
-            (landmarks[263].x * img_w, landmarks[263].y * img_h),  # Right eye right corner
-            (landmarks[61].x * img_w, landmarks[61].y * img_h),  # Left mouth corner
-            (landmarks[291].x * img_w, landmarks[291].y * img_h)  # Right mouth corner
-        ], dtype="double")
+        # Detect eyes
+        eyes = self.eye_cascade.detectMultiScale(gray_face, 1.1, 5)
 
-        # Camera internals
-        focal_length = img_w
-        center = (img_w / 2, img_h / 2)
-        camera_matrix = np.array([
-            [focal_length, 0, center[0]],
-            [0, focal_length, center[1]],
-            [0, 0, 1]
-        ], dtype="double")
+        pitch = 0  # Up/down tilt
+        yaw = 0    # Left/right turn
+        roll = 0   # Head tilt
 
-        dist_coeffs = np.zeros((4, 1))
+        if len(eyes) >= 2:
+            # Sort eyes by x coordinate
+            eyes = sorted(eyes, key=lambda e: e[0])
+            left_eye = eyes[0]
+            right_eye = eyes[1]
 
-        # Solve PnP
-        success, rotation_vector, translation_vector = cv2.solvePnP(
-            model_points, image_points, camera_matrix, dist_coeffs,
-            flags=cv2.SOLVEPNP_ITERATIVE
-        )
+            # Calculate eye centers
+            left_eye_center = (left_eye[0] + left_eye[2]//2, left_eye[1] + left_eye[3]//2)
+            right_eye_center = (right_eye[0] + right_eye[2]//2, right_eye[1] + right_eye[3]//2)
 
-        # Convert rotation vector to rotation matrix
-        rotation_matrix, _ = cv2.Rodrigues(rotation_vector)
+            # Calculate roll (head tilt) from eye alignment
+            dy = right_eye_center[1] - left_eye_center[1]
+            dx = right_eye_center[0] - left_eye_center[0]
+            roll = np.degrees(np.arctan2(dy, dx))
 
-        # Calculate Euler angles
-        pose_mat = cv2.hconcat((rotation_matrix, translation_vector))
-        _, _, _, _, _, _, euler_angles = cv2.decomposeProjectionMatrix(pose_mat)
+            # Estimate yaw from eye distance to face center
+            face_center_x = w // 2
+            eye_midpoint_x = (left_eye_center[0] + right_eye_center[0]) // 2
+            yaw_offset = eye_midpoint_x - face_center_x
+            yaw = (yaw_offset / (w / 2)) * 30  # Scale to degrees
 
-        pitch = euler_angles[0][0]
-        yaw = euler_angles[1][0]
-        roll = euler_angles[2][0]
+            # Estimate pitch from eye position relative to face height
+            eye_avg_y = (left_eye_center[1] + right_eye_center[1]) // 2
+            face_center_y = h // 2
+            pitch_offset = eye_avg_y - face_center_y
+            pitch = (pitch_offset / (h / 2)) * 30  # Scale to degrees
 
         return pitch, yaw, roll
 
-    def detect_nodding(self, pitch):
+    def detect_nodding(self, face_y):
         """
-        Detect nodding motion based on pitch changes
+        Detect nodding motion based on face Y position changes
 
         Args:
-            pitch: Current head pitch angle
+            face_y: Current Y position of face
 
         Returns:
             bool: True if nodding detected
         """
-        self.head_positions.append(pitch)
+        self.head_positions.append(face_y)
 
-        if len(self.head_positions) < 20:
+        if len(self.head_positions) < 15:
             return False
 
         # Check for significant up-down movement
-        recent_positions = list(self.head_positions)[-20:]
-        max_pitch = max(recent_positions)
-        min_pitch = min(recent_positions)
-        pitch_range = max_pitch - min_pitch
+        recent_positions = list(self.head_positions)[-15:]
+        max_y = max(recent_positions)
+        min_y = min(recent_positions)
+        y_range = max_y - min_y
 
         current_time = time.time()
 
         # Detect nod if significant movement and cooldown passed
-        if pitch_range > self.nod_threshold and (current_time - self.last_nod_time) > self.nod_cooldown:
+        if y_range > self.nod_threshold and (current_time - self.last_nod_time) > self.nod_cooldown:
             self.last_nod_time = current_time
             return True
 
@@ -267,7 +176,6 @@ class EyeContactDetector:
     """Detects eye contact based on gaze direction"""
 
     def __init__(self):
-        self.mp_face_mesh = mp.solutions.face_mesh
         self.eye_contact_threshold = 25  # Degrees from center
         self.eye_contact_history = deque(maxlen=30)
 
@@ -311,15 +219,6 @@ class InterviewAnalyzer:
             cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
         )
 
-        # MediaPipe Face Mesh
-        self.mp_face_mesh = mp.solutions.face_mesh
-        self.face_mesh = self.mp_face_mesh.FaceMesh(
-            max_num_faces=1,
-            refine_landmarks=True,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5
-        )
-
         # Tracking metrics
         self.metrics = {
             'emotions': [],
@@ -350,12 +249,8 @@ class InterviewAnalyzer:
 
         self.metrics['total_frames'] += 1
 
-        # Convert to RGB for MediaPipe
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        # Convert to grayscale for face detection
         gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-        # Get face mesh results
-        face_mesh_results = self.face_mesh.process(rgb_frame)
 
         analysis_data = {
             'emotion': 'Unknown',
@@ -370,10 +265,10 @@ class InterviewAnalyzer:
 
         for (x, y, w, h) in faces:
             # Draw face rectangle
-            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
 
             # Extract face for emotion recognition
-            face_roi = gray_frame[y:y + h, x:x + w]
+            face_roi = gray_frame[y:y+h, x:x+w]
 
             # Predict emotion
             emotion, confidence = self.emotion_recognizer.predict_emotion(face_roi)
@@ -383,9 +278,9 @@ class InterviewAnalyzer:
             # Track emotions
             self.metrics['emotions'].append(emotion)
 
-            # Categorize emotions
+            # Categorize emotions (7 classes)
             positive_emotions = ['Happy', 'Surprise']
-            negative_emotions = ['Angry', 'Contempt', 'Disgust', 'Fear', 'Sad']
+            negative_emotions = ['Angry', 'Disgust', 'Fear', 'Sad']
 
             if emotion in positive_emotions:
                 self.metrics['positive_emotions'] += 1
@@ -395,16 +290,12 @@ class InterviewAnalyzer:
                 self.metrics['neutral_emotions'] += 1
 
             # Display emotion
-            emotion_text = f"{emotion} ({confidence * 100:.1f}%)"
-            cv2.putText(frame, emotion_text, (x, y - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
-
-        # Head pose and eye contact analysis
-        if face_mesh_results.multi_face_landmarks:
-            face_landmarks = face_mesh_results.multi_face_landmarks[0]
+            emotion_text = f"{emotion} ({confidence*100:.1f}%)"
+            cv2.putText(frame, emotion_text, (x, y-10),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
 
             # Estimate head pose
-            pitch, yaw, roll = self.head_pose_estimator.estimate_head_pose(frame, face_landmarks)
+            pitch, yaw, roll = self.head_pose_estimator.estimate_head_pose_simple(frame, (x, y, w, h))
             analysis_data['head_pose'] = (pitch, yaw, roll)
 
             # Store head movement
@@ -416,7 +307,8 @@ class InterviewAnalyzer:
             })
 
             # Detect nodding
-            is_nodding = self.head_pose_estimator.detect_nodding(pitch)
+            face_center_y = y + h // 2
+            is_nodding = self.head_pose_estimator.detect_nodding(face_center_y)
             if is_nodding:
                 self.metrics['nods_detected'] += 1
                 analysis_data['nodding'] = True
@@ -430,18 +322,18 @@ class InterviewAnalyzer:
             # Display head pose info
             pose_text = f"Pitch: {pitch:.1f} Yaw: {yaw:.1f} Roll: {roll:.1f}"
             cv2.putText(frame, pose_text, (10, 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
 
             # Display eye contact status
             eye_contact_text = "Eye Contact: YES" if eye_contact else "Eye Contact: NO"
             eye_contact_color = (0, 255, 0) if eye_contact else (0, 0, 255)
             cv2.putText(frame, eye_contact_text, (10, 60),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, eye_contact_color, 2)
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, eye_contact_color, 2)
 
             # Display nodding
             if is_nodding:
                 cv2.putText(frame, "NODDING DETECTED", (10, 90),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
         return frame, analysis_data
 
@@ -458,12 +350,7 @@ class InterviewAnalyzer:
         return self.generate_report()
 
     def generate_report(self):
-        """
-        Generate comprehensive analysis report
-
-        Returns:
-            dict: Analysis report with recommendations
-        """
+        """Generate comprehensive analysis report"""
         if self.metrics['total_frames'] == 0:
             return {"error": "No data recorded"}
 
@@ -482,7 +369,7 @@ class InterviewAnalyzer:
         neutral_pct = (self.metrics['neutral_emotions'] / total_emotions * 100) if total_emotions > 0 else 0
 
         # Generate scores
-        eye_contact_score = min(100, eye_contact_pct * 1.2)  # Scale up slightly
+        eye_contact_score = min(100, eye_contact_pct * 1.2)
         emotion_score = positive_pct + (neutral_pct * 0.5) - (negative_pct * 0.3)
         engagement_score = min(100, (self.metrics['nods_detected'] / (self.metrics['total_frames'] / 30)) * 100)
 
@@ -522,7 +409,7 @@ class InterviewAnalyzer:
         return report
 
     def generate_recommendations(self, eye_contact_pct, positive_pct,
-                                 negative_pct, nods, dominant_emotion):
+                                negative_pct, nods, dominant_emotion):
         """Generate personalized recommendations"""
         recommendations = []
 
@@ -602,17 +489,99 @@ class InterviewAnalyzer:
         return recommendations
 
 
-def run_interview_practice(model_path=None, duration=60):
-    """
-    Run an interactive interview practice session
+def display_report(report):
+    """Display the analysis report in console"""
+    print("\n" + "="*60)
+    print("INTERVIEW PERFORMANCE REPORT")
+    print("="*60)
 
-    Args:
-        model_path: Path to trained emotion model (optional)
-        duration: Maximum duration in seconds (0 = unlimited)
-    """
-    print("\n" + "=" * 60)
+    print(f"\nOverall Score: {report['overall_score']:.1f}/100")
+    print(f"Duration: {report['duration_seconds']:.1f} seconds")
+    print(f"Frames Analyzed: {report['total_frames_analyzed']}")
+
+    print("\n" + "-"*60)
+    print("EYE CONTACT ANALYSIS")
+    print("-"*60)
+    print(f"Percentage: {report['eye_contact']['percentage']:.1f}%")
+    print(f"Score: {report['eye_contact']['score']:.1f}/100")
+    print(f"Frames with Contact: {report['eye_contact']['frames_with_contact']}")
+
+    print("\n" + "-"*60)
+    print("EMOTION ANALYSIS")
+    print("-"*60)
+    print(f"Most Common Emotion: {report['emotions']['most_common']}")
+    print(f"Positive Emotions: {report['emotions']['positive_percentage']:.1f}%")
+    print(f"Negative Emotions: {report['emotions']['negative_percentage']:.1f}%")
+    print(f"Neutral Emotions: {report['emotions']['neutral_percentage']:.1f}%")
+    print(f"Emotion Score: {report['emotions']['score']:.1f}/100")
+
+    print("\nEmotion Distribution:")
+    for emotion, count in sorted(report['emotions']['distribution'].items(),
+                                 key=lambda x: x[1], reverse=True):
+        print(f"  {emotion}: {count}")
+
+    print("\n" + "-"*60)
+    print("ENGAGEMENT ANALYSIS")
+    print("-"*60)
+    print(f"Nods Detected: {report['engagement']['nods_detected']}")
+    print(f"Engagement Score: {report['engagement']['score']:.1f}/100")
+
+    print("\n" + "="*60)
+    print("RECOMMENDATIONS")
+    print("="*60)
+
+    for i, rec in enumerate(report['recommendations'], 1):
+        severity_symbol = {
+            'high': '⚠️  [HIGH PRIORITY]',
+            'medium': '⚡ [MEDIUM]',
+            'low': '✓  [STRENGTH]'
+        }
+
+        print(f"\n{i}. {severity_symbol[rec['severity']]} {rec['category']}")
+        print(f"   {rec['message']}")
+        print(f"   💡 Tip: {rec['tip']}")
+
+    print("\n" + "="*60)
+
+
+def save_report_to_file(report, filename):
+    """Save report to text file"""
+    with open(filename, 'w') as f:
+        f.write("INTERVIEW PERFORMANCE REPORT\n")
+        f.write("="*60 + "\n\n")
+
+        f.write(f"Overall Score: {report['overall_score']:.1f}/100\n")
+        f.write(f"Duration: {report['duration_seconds']:.1f} seconds\n")
+        f.write(f"Frames Analyzed: {report['total_frames_analyzed']}\n\n")
+
+        f.write("-"*60 + "\n")
+        f.write("EYE CONTACT ANALYSIS\n")
+        f.write("-"*60 + "\n")
+        f.write(f"Percentage: {report['eye_contact']['percentage']:.1f}%\n")
+        f.write(f"Score: {report['eye_contact']['score']:.1f}/100\n\n")
+
+        f.write("-"*60 + "\n")
+        f.write("EMOTION ANALYSIS\n")
+        f.write("-"*60 + "\n")
+        f.write(f"Most Common: {report['emotions']['most_common']}\n")
+        f.write(f"Positive: {report['emotions']['positive_percentage']:.1f}%\n")
+        f.write(f"Negative: {report['emotions']['negative_percentage']:.1f}%\n")
+        f.write(f"Neutral: {report['emotions']['neutral_percentage']:.1f}%\n\n")
+
+        f.write("-"*60 + "\n")
+        f.write("RECOMMENDATIONS\n")
+        f.write("-"*60 + "\n")
+        for i, rec in enumerate(report['recommendations'], 1):
+            f.write(f"\n{i}. [{rec['severity'].upper()}] {rec['category']}\n")
+            f.write(f"   {rec['message']}\n")
+            f.write(f"   Tip: {rec['tip']}\n")
+
+
+def run_interview_practice(model_path=None, duration=60):
+    """Run an interactive interview practice session"""
+    print("\n" + "="*60)
     print("INTERVIEW BODY LANGUAGE ANALYZER")
-    print("=" * 60)
+    print("="*60)
     print("\nThis tool will analyze your:")
     print("  • Facial expressions and emotions")
     print("  • Eye contact")
@@ -652,14 +621,14 @@ def run_interview_practice(model_path=None, duration=60):
             elapsed = time.time() - start_time
             cv2.circle(annotated_frame, (30, 120), 10, (0, 0, 255), -1)
             cv2.putText(annotated_frame, f"REC {elapsed:.1f}s", (50, 125),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
             if duration > 0 and elapsed >= duration:
                 print("\nTime limit reached!")
                 break
         else:
             cv2.putText(annotated_frame, "Press 'S' to start", (10, 120),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
         # Display frame
         cv2.imshow('Interview Practice - Body Language Analysis', annotated_frame)
@@ -706,161 +675,29 @@ def run_interview_practice(model_path=None, duration=60):
         cv2.destroyAllWindows()
 
 
-def display_report(report):
-    """Display the analysis report in console"""
-    print("\n" + "=" * 60)
-    print("INTERVIEW PERFORMANCE REPORT")
-    print("=" * 60)
-
-    print(f"\nOverall Score: {report['overall_score']:.1f}/100")
-    print(f"Duration: {report['duration_seconds']:.1f} seconds")
-    print(f"Frames Analyzed: {report['total_frames_analyzed']}")
-
-    print("\n" + "-" * 60)
-    print("EYE CONTACT ANALYSIS")
-    print("-" * 60)
-    print(f"Percentage: {report['eye_contact']['percentage']:.1f}%")
-    print(f"Score: {report['eye_contact']['score']:.1f}/100")
-    print(f"Frames with Contact: {report['eye_contact']['frames_with_contact']}")
-
-    print("\n" + "-" * 60)
-    print("EMOTION ANALYSIS")
-    print("-" * 60)
-    print(f"Most Common Emotion: {report['emotions']['most_common']}")
-    print(f"Positive Emotions: {report['emotions']['positive_percentage']:.1f}%")
-    print(f"Negative Emotions: {report['emotions']['negative_percentage']:.1f}%")
-    print(f"Neutral Emotions: {report['emotions']['neutral_percentage']:.1f}%")
-    print(f"Emotion Score: {report['emotions']['score']:.1f}/100")
-
-    print("\nEmotion Distribution:")
-    for emotion, count in sorted(report['emotions']['distribution'].items(),
-                                 key=lambda x: x[1], reverse=True):
-        print(f"  {emotion}: {count}")
-
-    print("\n" + "-" * 60)
-    print("ENGAGEMENT ANALYSIS")
-    print("-" * 60)
-    print(f"Nods Detected: {report['engagement']['nods_detected']}")
-    print(f"Engagement Score: {report['engagement']['score']:.1f}/100")
-
-    print("\n" + "=" * 60)
-    print("RECOMMENDATIONS")
-    print("=" * 60)
-
-    for i, rec in enumerate(report['recommendations'], 1):
-        severity_symbol = {
-            'high': '⚠️  [HIGH PRIORITY]',
-            'medium': '⚡ [MEDIUM]',
-            'low': '✓  [STRENGTH]'
-        }
-
-        print(f"\n{i}. {severity_symbol[rec['severity']]} {rec['category']}")
-        print(f"   {rec['message']}")
-        print(f"   💡 Tip: {rec['tip']}")
-
-    print("\n" + "=" * 60)
-
-
-def save_report_to_file(report, filename):
-    """Save report to text file"""
-    with open(filename, 'w') as f:
-        f.write("INTERVIEW PERFORMANCE REPORT\n")
-        f.write("=" * 60 + "\n\n")
-
-        f.write(f"Overall Score: {report['overall_score']:.1f}/100\n")
-        f.write(f"Duration: {report['duration_seconds']:.1f} seconds\n")
-        f.write(f"Frames Analyzed: {report['total_frames_analyzed']}\n\n")
-
-        f.write("-" * 60 + "\n")
-        f.write("EYE CONTACT ANALYSIS\n")
-        f.write("-" * 60 + "\n")
-        f.write(f"Percentage: {report['eye_contact']['percentage']:.1f}%\n")
-        f.write(f"Score: {report['eye_contact']['score']:.1f}/100\n\n")
-
-        f.write("-" * 60 + "\n")
-        f.write("EMOTION ANALYSIS\n")
-        f.write("-" * 60 + "\n")
-        f.write(f"Most Common: {report['emotions']['most_common']}\n")
-        f.write(f"Positive: {report['emotions']['positive_percentage']:.1f}%\n")
-        f.write(f"Negative: {report['emotions']['negative_percentage']:.1f}%\n")
-        f.write(f"Neutral: {report['emotions']['neutral_percentage']:.1f}%\n\n")
-
-        f.write("-" * 60 + "\n")
-        f.write("RECOMMENDATIONS\n")
-        f.write("-" * 60 + "\n")
-        for i, rec in enumerate(report['recommendations'], 1):
-            f.write(f"\n{i}. [{rec['severity'].upper()}] {rec['category']}\n")
-            f.write(f"   {rec['message']}\n")
-            f.write(f"   Tip: {rec['tip']}\n")
-
-
-def train_emotion_model(train_dir, test_dir):
-    """
-    Train the emotion recognition model
-
-    Args:
-        train_dir: Path to training data directory (should contain subdirectories for each emotion)
-        test_dir: Path to testing data directory
-    """
-    print("\n" + "=" * 60)
-    print("EMOTION MODEL TRAINING")
-    print("=" * 60)
-
-    recognizer = EmotionRecognizer()
-
-    print("\nStarting training process...")
-    print("This may take a while depending on your hardware...\n")
-
-    history = recognizer.train_model(train_dir, test_dir, epochs=50)
-
-    print("\n" + "=" * 60)
-    print("Training completed!")
-    print("Model saved as 'emotion_model.h5'")
-    print("=" * 60)
-
-
 if __name__ == "__main__":
     import sys
 
-    print("\n" + "=" * 60)
+    print("\n" + "="*60)
     print("INTERVIEW BODY LANGUAGE ANALYZER")
-    print("=" * 60)
-    print("\nChoose an option:")
-    print("1. Run interview practice (requires trained model)")
-    print("2. Train emotion recognition model")
-    print("3. Exit")
+    print("(OpenCV-only version - No MediaPipe required)")
+    print("="*60)
 
-    choice = input("\nEnter your choice (1-3): ").strip()
+    # Check if emotion model exists
+    model_path = "emotion_model.h5"
 
-    if choice == "1":
-        model_path = input("\nEnter path to trained model (or press Enter for 'emotion_model.h5'): ").strip()
-        if not model_path:
-            model_path = "emotion_model.h5"
-
-        if not os.path.exists(model_path):
-            print(f"\nModel not found at {model_path}")
-            print("Please train the model first (option 2) or provide correct path.")
+    # Look in parent directory if not found
+    if not os.path.exists(model_path):
+        parent_model = "../emotion_model.h5"
+        if os.path.exists(parent_model):
+            model_path = parent_model
         else:
-            duration = input("\nEnter duration in seconds (0 for unlimited): ").strip()
-            duration = int(duration) if duration.isdigit() else 60
+            print(f"\nWARNING: Emotion model not found at {model_path}")
+            print("The script will run but emotion detection will not work.")
+            print("Make sure emotion_model.h5 is in the same directory as this script.\n")
+            model_path = None
 
-            run_interview_practice(model_path, duration)
+    duration = input("\nEnter duration in seconds (0 for unlimited, default=60): ").strip()
+    duration = int(duration) if duration.isdigit() else 60
 
-    elif choice == "2":
-        print("\nTo train the model, you need the Kaggle dataset:")
-        print("https://www.kaggle.com/datasets/jonathanoheix/face-expression-recognition-dataset/data")
-        print("\nExtract it and provide paths to 'train' and 'test' directories.")
-
-        train_dir = input("\nEnter path to training directory: ").strip()
-        test_dir = input("Enter path to testing directory: ").strip()
-
-        if os.path.exists(train_dir) and os.path.exists(test_dir):
-            train_emotion_model(train_dir, test_dir)
-        else:
-            print("\nError: Invalid directory paths!")
-
-    elif choice == "3":
-        print("\nGoodbye!")
-
-    else:
-        print("\nInvalid choice!")
+    run_interview_practice(model_path, duration)
