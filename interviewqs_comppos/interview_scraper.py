@@ -7,8 +7,7 @@ import ollama
 from ddgs import DDGS  # Updated package
 
 # --- CONFIGURATION ---
-TARGET_COMPANY = "Google"
-TARGET_POSITION = "Software Engineer"
+import argparse
 OLLAMA_MODEL = "llama3"
 DEMO_MODE = False  # Set TRUE if wifi dies during demo
 
@@ -149,7 +148,9 @@ RULES:
 
 
 # ---------------- MAIN ----------------
-def main():
+def main(company="Google", position="Software Engineer"):
+    TARGET_COMPANY = company
+    TARGET_POSITION = position
     print(f"🚀 SuitUp Generator: {TARGET_COMPANY} - {TARGET_POSITION}\n")
 
     queries = get_smart_queries(TARGET_COMPANY, TARGET_POSITION)
@@ -191,4 +192,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--company", default="Google", help="Target company")
+    parser.add_argument("--position", default="Software Engineer", help="Target position")
+    args = parser.parse_args()
+    main(company=args.company, position=args.position)

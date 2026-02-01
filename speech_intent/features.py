@@ -78,8 +78,6 @@ def pad_or_truncate(features, target_length=88):
     """Pad or truncate feature vector to target length."""
     if len(features) < target_length:
         return np.pad(features, (0, target_length - len(features)), 'constant')
-    else:
-        return features[:target_length]
     return features[:target_length] 
 
 def prepare_features(features):
