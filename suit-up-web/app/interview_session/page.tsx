@@ -4,11 +4,11 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Mic, MicOff, PhoneOff, Loader2 } from "lucide-react";
 
-const BACKEND = "http://localhost:8000";
+const BACKEND = typeof process !== "undefined" && process.env.NEXT_PUBLIC_BACKEND_URL
+  ? process.env.NEXT_PUBLIC_BACKEND_URL
+  : "http://localhost:8000";
 const INTERVIEW_DURATION_MS = 40 * 60 * 1000;
-const FRAME_INTERVAL_MS = 5000; // Reduce from 2s to 5s to avoid camera delay
-const AUDIO_CHUNK_MS = 15000;
-const SILENCE_THRESHOLD_MS = 5000; // 5 seconds of no speech before AI responds
+const FRAME_INTERVAL_MS = 2000;
 
 export default function InterviewSessionPage() {
   const router = useRouter();
@@ -19,7 +19,6 @@ export default function InterviewSessionPage() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
-  const [jawOffset, setJawOffset] = useState(0);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
@@ -34,15 +33,17 @@ export default function InterviewSessionPage() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
-  const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
   const handleReplyRef = useRef<((text: string) => Promise<void>) | null>(null);
-  const volumeIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Attach camera stream to video when interview view is mounted
+  useEffect(() => {
+    if (!isStarted || !videoRef.current || !streamRef.current) return;
+    videoRef.current.srcObject = streamRef.current;
+  }, [isStarted]);
 
   const buildSystemPrompt = useCallback(() => {
     const resumeQs = JSON.parse(localStorage.getItem("interview_questions") || "[]");
@@ -57,7 +58,7 @@ export default function InterviewSessionPage() {
       ...techQs.slice(0, 3),
       ...behavQs.slice(0, 3),
     ].filter(Boolean);
-    return `You are Barney Stinson from How I Met Your Mother, acting as a charismatic interviewer at ${company} for the ${position} role. Stay in character - confident, smooth, occasional catchphrases. Ask ONE question at a time. Mix these question themes naturally: ${allQuestions.slice(0, 8).join(" | ")}. Keep responses concise. After the candidate answers, ask the next question or wrap up after 5-7 exchanges.`;
+    return `You are a professional hiring manager conducting an interview at ${company} for the ${position} role. Your name is Barney. At the very start of the interview, introduce yourself by saying: "My name is Barney, and I will be your interviewer today." Be courteous and business-appropriate. Ask ONE question at a time. Use these themes: ${allQuestions.slice(0, 8).join(" | ")}. After the candidate answers, briefly acknowledge or give one sentence of constructive feedback, then ask the next question. Keep responses concise and professional. Wrap up after 5-7 exchanges.`;
   }, []);
 
   const speakWithSync = useCallback((text: string) => {
@@ -65,7 +66,13 @@ export default function InterviewSessionPage() {
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     const voices = window.speechSynthesis.getVoices();
-    utterance.voice = voices.find((v) => v.name.includes("Male") || v.lang.includes("en-GB")) || voices[0];
+    const maleVoice = voices.length
+      ? (voices.find((v) => v.name.toLowerCase().includes("male"))
+          || voices.find((v) => v.lang.startsWith("en") && v.name.includes("Male"))
+          || voices.find((v) => v.lang.includes("en-GB"))
+          || voices[0])
+      : null;
+    if (maleVoice) utterance.voice = maleVoice;
     utterance.rate = 0.95;
     setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
     utterance.onboundary = (event) => {
@@ -87,7 +94,6 @@ export default function InterviewSessionPage() {
         const last = prev[prev.length - 1];
         return [...prev.slice(0, -1), { ...last, content: text }];
       });
-      setIsRecording(true); // Resume listening after AI speaks
     };
     window.speechSynthesis.speak(utterance);
   }, []);
@@ -134,13 +140,30 @@ export default function InterviewSessionPage() {
   );
   handleReplyRef.current = handleReply;
 
+  // Helper to find valid MIME type for the browser
+  const getSupportedMimeType = useCallback(() => {
+    const types = [
+      "audio/webm;codecs=opus",
+      "audio/webm",
+      "audio/mp4",
+      "audio/ogg",
+    ];
+    for (const type of types) {
+      if (MediaRecorder.isTypeSupported(type)) return type;
+    }
+    return ""; // Empty lets browser choose default
+  }, []);
+
   const stopRecordingAndTranscribe = useCallback(async () => {
     const recorder = mediaRecorderRef.current;
-    if (!recorder || recorder.state === "inactive") return;
+    if (!recorder || recorder.state !== "recording") return;
     setIsRecording(false);
     setIsTranscribing(true);
 
-    recorder.stop();
+    try {
+      recorder.stop();
+    } catch (_) {}
+
     await new Promise<void>((resolve) => {
       const onStop = () => {
         recorder.removeEventListener("stop", onStop);
@@ -152,9 +175,9 @@ export default function InterviewSessionPage() {
     const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
     audioChunksRef.current = [];
 
-    if (blob.size < 1000) {
+    if (blob.size < 200) {
       setIsTranscribing(false);
-      setIsRecording(true);
+      mediaRecorderRef.current = null;
       return;
     }
 
@@ -163,7 +186,7 @@ export default function InterviewSessionPage() {
       const b64 = (reader.result as string).split(",")[1];
       if (!b64) {
         setIsTranscribing(false);
-        setIsRecording(true);
+        mediaRecorderRef.current = null;
         return;
       }
       try {
@@ -176,17 +199,22 @@ export default function InterviewSessionPage() {
           }),
         });
         const data = await res.json();
-        const transcript = data.transcription?.trim() || "";
-        if (transcript && handleReplyRef.current) {
-          await handleReplyRef.current(transcript);
+        const transcript = (data.transcription ?? "").toString().trim();
+        if (handleReplyRef.current) {
+          if (transcript) {
+            await handleReplyRef.current(transcript);
+          } else {
+            setMessages((prev) => [...prev.filter((m) => m.role !== "system"), { role: "user", content: "(No speech detected — try again)" }]);
+          }
         }
       } catch (e) {
         console.error("Transcribe error:", e);
         setBackendError("Could not transcribe. Is the backend running on port 8000?");
+        setMessages((prev) => [...prev.filter((m) => m.role !== "system"), { role: "user", content: "(Transcription failed — check backend)" }]);
       } finally {
         setIsTranscribing(false);
-        setIsRecording(true);
-        mediaRecorderRef.current?.start(AUDIO_CHUNK_MS);
+        setIsRecording(false);
+        mediaRecorderRef.current = null;
       }
     };
     reader.readAsDataURL(blob);
@@ -194,13 +222,48 @@ export default function InterviewSessionPage() {
 
   const toggleRecording = useCallback(() => {
     if (isTranscribing || isSpeaking) return;
+
     if (isRecording) {
       stopRecordingAndTranscribe();
     } else {
-      setIsRecording(true);
-      mediaRecorderRef.current?.start(AUDIO_CHUNK_MS);
+      const stream = streamRef.current;
+      if (!stream || !stream.active || stream.getAudioTracks().length === 0) {
+        console.error("Stream invalid or missing audio tracks");
+        return;
+      }
+
+      try {
+        const mimeType = getSupportedMimeType();
+        // Removed audioBitsPerSecond to fix NotSupportedError
+        const options: MediaRecorderOptions = mimeType ? { mimeType } : {};
+        
+        const recorder = new MediaRecorder(stream, options);
+        audioChunksRef.current = [];
+
+        recorder.ondataavailable = (e) => {
+          if (e.data && e.data.size > 0) audioChunksRef.current.push(e.data);
+        };
+        
+        mediaRecorderRef.current = recorder;
+        recorder.start(1000); // Record in 1s chunks
+        setIsRecording(true);
+      } catch (err) {
+        console.error("Recorder start failed:", err);
+        // Fallback to absolute defaults
+        try {
+            const fallback = new MediaRecorder(stream);
+            audioChunksRef.current = [];
+            fallback.ondataavailable = e => { if (e.data.size>0) audioChunksRef.current.push(e.data); };
+            mediaRecorderRef.current = fallback;
+            fallback.start(1000);
+            setIsRecording(true);
+        } catch(e2) {
+            console.error("Fallback failed:", e2);
+            setBackendError("Recording not supported by this browser.");
+        }
+      }
     }
-  }, [isRecording, isTranscribing, isSpeaking, stopRecordingAndTranscribe]);
+  }, [isRecording, isTranscribing, isSpeaking, stopRecordingAndTranscribe, getSupportedMimeType]);
 
   const startInterview = useCallback(async () => {
     setBackendError(null);
@@ -208,6 +271,20 @@ export default function InterviewSessionPage() {
     const companyQuestions = JSON.parse(localStorage.getItem("company_questions") || "{}");
     const company = localStorage.getItem("company") || "Company";
     const position = localStorage.getItem("position") || "Role";
+
+    // Start camera first
+    let stream: MediaStream | null = null;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: 640, height: 480, frameRate: 15 },
+        audio: true,
+      });
+      streamRef.current = stream;
+      if (videoRef.current) videoRef.current.srcObject = stream;
+    } catch (err) {
+      console.error("Media error:", err);
+      setBackendError("Could not access camera/microphone. Check permissions.");
+    }
 
     try {
       const res = await fetch(`${BACKEND}/start-interview`, {
@@ -236,106 +313,58 @@ export default function InterviewSessionPage() {
     const system = { role: "system", content: buildSystemPrompt() };
     setMessages([system]);
     setIsStarted(true);
+
+    // Initial AI greeting
     await getAIResponse([system, { role: "user", content: "Start the interview." }]);
+  }, [buildSystemPrompt, getAIResponse]);
 
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 640, height: 480, frameRate: 15 },
-        audio: true,
-      });
-      streamRef.current = stream;
-      if (videoRef.current) videoRef.current.srcObject = stream;
-
-      const recorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = recorder;
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunksRef.current.push(e.data);
-      };
-      recorder.onstop = () => {
-        const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
-        audioChunksRef.current = [];
-        const sid = sessionIdRef.current;
-        if (sid && blob.size > 1000) {
-          const r = new FileReader();
-          r.onloadend = () => {
-            const b64 = (r.result as string).split(",")[1];
-            if (b64)
-              fetch(`${BACKEND}/process-audio`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ session_id: sid, audio_base64: b64 }),
-              }).catch(() => {});
-          };
-          r.readAsDataURL(blob);
-        }
-      };
-
-      recorder.start(AUDIO_CHUNK_MS);
-      setIsRecording(true);
-
-      // Silence detection: after 5 sec of low volume, auto-submit
-      const audioContext = new AudioContext();
-      audioContextRef.current = audioContext;
-      const source = audioContext.createMediaStreamSource(stream);
-      const analyser = audioContext.createAnalyser();
-      analyser.fftSize = 256;
-      source.connect(analyser);
-      analyserRef.current = analyser;
-
-      const dataArray = new Uint8Array(analyser.frequencyBinCount);
-      let lastLoudTime = Date.now();
-
-      const checkVolume = () => {
-        if (isTranscribing || isSpeaking) return;
-        if (!recorder || recorder.state !== "recording") return;
-        analyser.getByteFrequencyData(dataArray);
-        const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
-        if (avg > 15) lastLoudTime = Date.now();
-        else if (Date.now() - lastLoudTime > SILENCE_THRESHOLD_MS && audioChunksRef.current.length > 0) {
-          lastLoudTime = Date.now();
-          stopRecordingAndTranscribe();
-        }
-      };
-      volumeIntervalRef.current = setInterval(checkVolume, 500);
-    } catch (err) {
-      console.error("Media error:", err);
-      setBackendError("Could not access camera/microphone. Check permissions.");
-    }
-  }, [buildSystemPrompt, getAIResponse, stopRecordingAndTranscribe]);
-
-  // Frame capture - reduced frequency, lower quality
+  // Frame capture logic
   useEffect(() => {
-    if (!isStarted || !sessionId || !videoRef.current) return;
+    if (!isStarted || !sessionId) return;
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas) return;
+
+    const sid = sessionId;
     const sendFrame = () => {
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      if (!video || !canvas || video.readyState < 2) return;
-      const ctx = canvas.getContext("2d");
+      if (!videoRef.current || !canvasRef.current) return;
+      const v = videoRef.current;
+      const c = canvasRef.current;
+      if (v.readyState < 1) return;
+      const ctx = c.getContext("2d");
       if (!ctx) return;
-      canvas.width = 160;
-      canvas.height = 120;
-      ctx.drawImage(video, 0, 0, 160, 120);
-      canvas.toBlob(
-        (blob) => {
-          if (!blob) return;
-          const reader = new FileReader();
-          reader.onloadend = () => {
-            const b64 = (reader.result as string).split(",")[1];
-            if (b64)
-              fetch(`${BACKEND}/process-frame`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ session_id: sessionId, frame_base64: b64 }),
-              }).catch(() => {});
-          };
-          reader.readAsDataURL(blob);
-        },
-        "image/jpeg",
-        0.3
-      );
+      try {
+        c.width = 160;
+        c.height = 120;
+        ctx.drawImage(v, 0, 0, 160, 120);
+        c.toBlob(
+          (blob) => {
+            if (!blob) return;
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              const b64 = (reader.result as string).split(",")[1];
+              if (b64)
+                fetch(`${BACKEND}/process-frame`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ session_id: sid, frame_base64: b64 }),
+                }).catch(() => {});
+            };
+            reader.readAsDataURL(blob);
+          },
+          "image/jpeg",
+          0.4
+        );
+      } catch (_) {}
     };
+
+    const onCanPlay = () => sendFrame();
+    video.addEventListener("loadeddata", onCanPlay);
+    video.addEventListener("playing", onCanPlay);
     frameIntervalRef.current = setInterval(sendFrame, FRAME_INTERVAL_MS);
     return () => {
+      video.removeEventListener("loadeddata", onCanPlay);
+      video.removeEventListener("playing", onCanPlay);
       if (frameIntervalRef.current) clearInterval(frameIntervalRef.current);
     };
   }, [isStarted, sessionId]);
@@ -351,11 +380,9 @@ export default function InterviewSessionPage() {
   const handleEndCall = async () => {
     if (isEnding) return;
     setIsEnding(true);
-    volumeIntervalRef.current && clearInterval(volumeIntervalRef.current);
-    mediaRecorderRef.current?.stop();
+    if (mediaRecorderRef.current?.state === "recording") mediaRecorderRef.current.stop();
     streamRef.current?.getTracks().forEach((t) => t.stop());
     frameIntervalRef.current && clearInterval(frameIntervalRef.current);
-    audioContextRef.current?.close();
 
     const conv = messages.filter((m) => m.role !== "system").map((m) => ({ role: m.role, content: m.content }));
     const sid = sessionId || sessionIdRef.current || "local-" + Date.now();
@@ -369,13 +396,6 @@ export default function InterviewSessionPage() {
   useEffect(() => {
     if (elapsed * 1000 >= INTERVIEW_DURATION_MS) handleEndCallRef.current();
   }, [elapsed]);
-
-  useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (isSpeaking) interval = setInterval(() => setJawOffset(Math.random() * 12), 80);
-    else setJawOffset(0);
-    return () => clearInterval(interval);
-  }, [isSpeaking]);
 
   const formatTime = (s: number) => {
     const m = Math.floor(s / 60);
@@ -407,23 +427,20 @@ export default function InterviewSessionPage() {
         </div>
       )}
       <div className="flex-1 flex min-h-0">
-        <div className="flex-1 relative flex items-center justify-center bg-navy-800 p-6">
-          <div className="relative w-full max-w-4xl aspect-video rounded-2xl overflow-hidden border border-gold-500/30 shadow-2xl bg-navy-900">
-            <img src="/Barney.jpg" alt="Interviewer" className="w-full h-full object-cover" />
-            <div
-              className="absolute inset-0 w-full h-full pointer-events-none"
-              style={{ clipPath: "inset(60% 20% 10% 20%)", transform: `translateY(${jawOffset}px)` }}
-            >
-              <img src="/Barney.jpg" alt="" className="w-full h-full object-cover" />
-            </div>
+        <div className="flex-1 relative flex items-center justify-center bg-navy-800 p-4 min-w-0">
+          {/* Barney fills the entire allocated space */}
+          <div className="absolute inset-4 rounded-2xl overflow-hidden border border-gold-500/30 shadow-2xl bg-navy-900">
+            <img src="/Barney.jpg" alt="Interviewer" className="absolute inset-0 w-full h-full object-cover object-center" />
             <div className="absolute bottom-4 left-4 bg-black/60 px-3 py-1.5 rounded text-sm text-gold-500 border border-gold-500/30">
               Barney (Hiring Manager)
             </div>
           </div>
-          <div className="absolute bottom-6 left-6 w-56 h-36 bg-navy-900 rounded-xl border-2 border-gold-500/30 overflow-hidden shadow-xl">
+          {/* User camera: fixed corner overlay so it's always visible */}
+          <div className="absolute bottom-6 right-6 w-48 h-36 rounded-xl border-2 border-gold-500/30 overflow-hidden shadow-xl bg-navy-900 z-10">
             <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover -scale-x-100" />
+            <div className="absolute bottom-0 left-0 right-0 py-1 bg-black/60 text-center text-[10px] text-white/80">You</div>
           </div>
-          <div className="absolute top-6 right-6 bg-black/60 px-4 py-2 rounded font-mono text-gold-500">
+          <div className="absolute top-6 right-6 bg-black/60 px-4 py-2 rounded font-mono text-gold-500 z-10">
             {formatTime(elapsed)}
           </div>
         </div>
@@ -435,7 +452,7 @@ export default function InterviewSessionPage() {
               .filter((m) => m.role !== "system")
               .map((m, i) => (
                 <div key={i} className={`flex flex-col ${m.role === "user" ? "items-end" : "items-start"}`}>
-                  <span className="text-[10px] text-gold-500/60 mb-1 uppercase">{m.role === "user" ? "You" : "Barney"}</span>
+                  <span className="text-[10px] text-gold-500/60 mb-1 uppercase">{m.role === "user" ? "You" : "Interviewer"}</span>
                   <div
                     className={`p-3 rounded-lg text-sm ${
                       m.isThinking
@@ -451,8 +468,8 @@ export default function InterviewSessionPage() {
               ))}
             <div ref={chatEndRef} />
           </div>
-          <div className="p-3 text-center text-xs font-mono text-white/40">
-            {isTranscribing ? "Transcribing with Whisper..." : isRecording ? "● Recording... Click mic when done (or wait 5s silence)" : "Click mic to start recording your answer"}
+          <div className="p-3 text-center text-xs text-white/50">
+            {isTranscribing ? "Processing..." : isRecording ? "Recording — click mic when done" : "Click mic to speak your answer"}
           </div>
         </div>
       </div>

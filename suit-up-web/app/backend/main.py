@@ -16,14 +16,14 @@ import uuid
 from pathlib import Path
 from datetime import datetime
 
-# Paths
+# Paths (suit-up-web/app/backend; extras at repo root)
 BASE_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BASE_DIR.parent.parent.parent
 UPLOADS_DIR = BASE_DIR / "uploads"
 SESSIONS_DIR = BASE_DIR / "sessions"
-SPEECH_INTENT_DIR = PROJECT_ROOT / "speech_intent"
+SPEECH_INTENT_DIR = PROJECT_ROOT / "extras" / "speech_intent" if (PROJECT_ROOT / "extras" / "speech_intent").exists() else PROJECT_ROOT / "speech_intent"
 VISUAL_PERCEPTION_DIR = PROJECT_ROOT / "suit-up-web" / "visual_perception"
-INTERVIEWQS_DIR = PROJECT_ROOT / "interviewqs_comppos"
+INTERVIEWQS_DIR = PROJECT_ROOT / "extras" / "interviewqs_comppos" if (PROJECT_ROOT / "extras" / "interviewqs_comppos").exists() else PROJECT_ROOT / "interviewqs_comppos"
 
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 os.makedirs(SESSIONS_DIR, exist_ok=True)
@@ -171,8 +171,39 @@ async def generate_company_questions(req: CompanyPositionRequest):
 
 
 # ============ Visual Perception (body_language_detection) ============
+class _StubVisualAnalyzer:
+    """Fallback when full emotion model is not available; still counts frames for report."""
+
+    def __init__(self):
+        self.recording = False
+        self.start_time = None
+        self.metrics = {"total_frames": 0}
+
+    def start_recording(self):
+        self.recording = True
+        self.start_time = __import__("time").time()
+
+    def analyze_frame(self, frame):
+        if self.recording:
+            self.metrics["total_frames"] += 1
+        return frame, None
+
+    def stop_recording(self):
+        self.recording = False
+        if self.metrics["total_frames"] == 0:
+            return {"error": "No data recorded"}
+        return {
+            "overall_score": 0,
+            "duration_seconds": (__import__("time").time() - self.start_time) if self.start_time else 0,
+            "total_frames_analyzed": self.metrics["total_frames"],
+            "eye_contact": {"percentage": 0, "score": 0},
+            "emotions": {"most_common": "N/A", "positive_percentage": 0, "negative_percentage": 0, "neutral_percentage": 0},
+            "recommendations": [{"category": "Visual", "severity": "low", "message": "Emotion model was unavailable; only frame count recorded.", "tip": "Install TensorFlow and emotion_model.h5 for full analysis."}],
+        }
+
+
 def init_visual_analyzer(session_id: str):
-    """Initialize visual analyzer for a session."""
+    """Initialize visual analyzer for a session; fallback to stub if model fails."""
     model_path = VISUAL_PERCEPTION_DIR / "emotion_model.h5"
     if not model_path.exists():
         model_path = PROJECT_ROOT / "suit-up-web" / "visual_perception" / "emotion_model.h5"
@@ -185,8 +216,11 @@ def init_visual_analyzer(session_id: str):
         visual_analyzers[session_id] = analyzer
         return True
     except Exception as e:
-        print(f"Visual analyzer init error: {e}")
-        return False
+        print(f"Visual analyzer init error (using stub): {e}")
+        stub = _StubVisualAnalyzer()
+        stub.start_recording()
+        visual_analyzers[session_id] = stub
+        return True
 
 
 @app.post("/process-frame")
@@ -355,8 +389,10 @@ async def end_interview(req: EndInterviewRequest):
     # 2. Get speech results
     voice_entries = speech_results.pop(session_id, [])
 
-    # 3. Llama content feedback
-    content_feedback = await _get_llama_content_feedback(req.conversation)
+    # 3. Llama content feedback (only if we have user input)
+    conv = req.conversation or []
+    user_msgs = [m for m in conv if m.get("role") == "user" and (m.get("content") or "").strip()]
+    content_feedback = await _get_llama_content_feedback(req.conversation) if user_msgs else ""
 
     # 4. Build combined feedback
     feedback = _build_feedback_report(
@@ -369,20 +405,24 @@ async def end_interview(req: EndInterviewRequest):
 
 
 async def _get_llama_content_feedback(conversation: list) -> str:
-    """Use Ollama to evaluate interview answers."""
+    """Use Ollama to evaluate interview answers based on actual user responses."""
     transcript = "\n".join([f"{m.get('role','')}: {m.get('content','')}" for m in conversation if m.get("role") != "system"])
-    prompt = f"""You are an expert interview coach. Evaluate this mock interview transcript.
+    user_answers = [m.get("content", "") for m in conversation if m.get("role") == "user" and m.get("content")]
+    prompt = f"""You are an expert interview coach. Evaluate this mock interview transcript. Your feedback must be specific to what the candidate actually said — reference their exact answers where relevant. Do not give generic advice.
 
 Transcript:
-{transcript[:4000]}
+{transcript[:5000]}
 
-Provide 3-5 concise bullet points of constructive feedback on the candidate's answers:
-- Content quality and relevance
-- Clarity and structure
-- Areas to improve
-- Strengths demonstrated
+Candidate's answers (for reference): {chr(10).join([a[:200] for a in user_answers[:15]])}
 
-Keep each point under 2 lines. Be encouraging but specific."""
+Provide 3-5 bullet points of constructive feedback:
+- Reference specific things the candidate said (e.g. "When you said X, consider adding Y").
+- Content quality and relevance to the questions asked.
+- Clarity and structure of their answers.
+- One or two concrete areas to improve, tied to their actual responses.
+- Strengths they demonstrated.
+
+Keep each point under 2 lines. Be encouraging, professional, and specific to this transcript. No generic phrases."""
 
     try:
         import ollama
@@ -395,16 +435,38 @@ Keep each point under 2 lines. Be encouraging but specific."""
 
 def _build_feedback_report(session_id: str, session: dict, visual_report: dict | None, voice_entries: list, content_feedback: str) -> dict:
     """Build combined feedback in interview_report.txt format."""
+    company = (session.get("company") or "N/A").strip()
+    position = (session.get("position") or "N/A").strip()
+
+    # No user input: no transcriptions, no user messages in conversation
+    conv = session.get("conversation") or []
+    user_messages = [m for m in conv if (m.get("role") == "user" and (m.get("content") or "").strip())]
+    has_transcriptions = any((e.get("transcription") or "").strip() for e in voice_entries)
+    has_visual_data = visual_report and (visual_report.get("total_frames_analyzed") or 0) > 0
+    if not user_messages and not has_transcriptions and not has_visual_data:
+        report_text = (
+            "INTERVIEW PERFORMANCE REPORT\n"
+            + "=" * 60 + "\n\n"
+            + f"Company: {company}\n"
+            + f"Position: {position}\n\n"
+            + "Feedback report unavailable. No input found.\n\n"
+            + "=" * 60
+        )
+        report_path = SESSIONS_DIR / f"interview_report_{session_id[:8]}.txt"
+        with open(report_path, "w") as f:
+            f.write(report_text)
+        return {"report_text": report_text, "report_path": str(report_path)}
+
     lines = [
         "INTERVIEW PERFORMANCE REPORT",
         "=" * 60,
         "",
-        f"Company: {session.get('company', 'N/A')}",
-        f"Position: {session.get('position', 'N/A')}",
+        f"Company: {company}",
+        f"Position: {position}",
         "",
     ]
 
-    if visual_report:
+    if visual_report and not visual_report.get("error"):
         lines.extend([
             f"Overall Score: {visual_report.get('overall_score', 0):.1f}/100",
             f"Duration: {visual_report.get('duration_seconds', 0):.1f} seconds",
@@ -432,8 +494,25 @@ def _build_feedback_report(session_id: str, session: dict, visual_report: dict |
             lines.append(f"\n{i}. [{rec.get('severity', 'low').upper()}] {rec.get('category', '')}")
             lines.append(f"   {rec.get('message', '')}")
             lines.append(f"   Tip: {rec.get('tip', '')}")
+    elif visual_report and visual_report.get("error"):
+        lines.extend([
+            "",
+            "-" * 60,
+            "VISUAL / EMOTION ANALYSIS",
+            "-" * 60,
+            "No frames were received or the emotion model was unavailable during the interview.",
+            "Ensure your camera is on and shared for the next session.",
+            "",
+        ])
     else:
-        lines.append("(Visual analysis unavailable - camera not shared or analyzer failed)\n")
+        lines.extend([
+            "",
+            "-" * 60,
+            "VISUAL / EMOTION ANALYSIS",
+            "-" * 60,
+            "Visual analyzer was not initialized (camera may not have been shared).",
+            "",
+        ])
 
     if voice_entries:
         lines.extend([
@@ -442,8 +521,12 @@ def _build_feedback_report(session_id: str, session: dict, visual_report: dict |
             "VOICE / SPEECH ANALYSIS",
             "-" * 60,
         ])
-        for e in voice_entries[-10:]:  # Last 10 entries
-            lines.append(f"• [{e.get('predicted_state', 'unknown')}] {e.get('transcription', '')[:100]}")
+        for e in voice_entries[-10:]:
+            trans = (e.get("transcription") or "").strip()
+            if not trans:
+                continue
+            state = e.get("predicted_state", "unknown")
+            lines.append(f"• [{state}] {trans[:150]}")
         lines.append("")
 
     lines.extend([

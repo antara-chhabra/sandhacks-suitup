@@ -24,7 +24,10 @@ export default function CompanyPositionPage() {
     setIsLoading(true);
 
     try {
-      const res = await fetch("http://localhost:8000/generate-company-questions", {
+      const BACKEND = typeof process !== "undefined" && process.env.NEXT_PUBLIC_BACKEND_URL
+        ? process.env.NEXT_PUBLIC_BACKEND_URL
+        : "http://localhost:8000";
+      const res = await fetch(`${BACKEND}/generate-company-questions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ company: company.trim(), position: position.trim() }),

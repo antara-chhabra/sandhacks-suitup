@@ -1,0 +1,20 @@
+INTERVIEW PERFORMANCE REPORT
+============================================================
+
+Company: google
+Position: software engineer
+
+------------------------------------------------------------
+CONTENT FEEDBACK (AI Evaluation)
+------------------------------------------------------------
+Here's my evaluation of the candidate's interview:
+
+1. **Clear structure, but could be more concise**: The candidate provided a clear overview of their experience with technical challenges, but some answers felt a bit lengthy. For example, when discussing the challenge, they said: "I think what really helped me was just taking a step back and understanding what was going on...". To improve, consider breaking up longer responses into shorter, more focused points.
+2. **Relevant examples, but could delve deeper**: The candidate provided some relevant examples from their experience, such as describing a specific project they worked on. However, to further demonstrate their technical skills and problem-solving approach, it would be great to hear more details about the solution they implemented or any challenges they overcame.
+3. **Strength in storytelling, but could provide more context**: The candidate has a natural ability to tell engaging stories about their experiences, which is great for building rapport with the interviewer. To further improve, consider providing more context about the specific technical skills used, how they learned from the experience, or what they would do differently if faced with a similar challenge in the future.
+4. **Area to improve: Providing concrete numbers and metrics**: When discussing the impact of their work, the candidate mentioned "the project was really successful," but didn't provide any concrete metrics or numbers. To take it to the next level, consider quantifying the success, such as "we increased user engagement by 20% or reduced latency by 30%."
+5. **Strength in enthusiasm and confidence**: The candidate demonstrated a clear passion for their work and confidence in their abilities. This enthusiasm is infectious and shows a strong potential fit with Google's culture.
+
+Overall, this candidate has a solid foundation to build upon. With some refinement around providing more concise answers, delving deeper into technical details, and quantifying successes, they'll be well-positioned to showcase their skills and approach to problem-solving in the software engineering role.
+
+============================================================

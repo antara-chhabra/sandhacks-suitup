@@ -1,0 +1,19 @@
+{
+  "company": "sfdf",
+  "position": "errt",
+  "company_values": [
+    "Excellence at sfdf",
+    "Collaboration",
+    "Innovation"
+  ],
+  "technical_questions": [
+    "Describe a technical challenge you solved as a errt.",
+    "Explain a system you designed.",
+    "How do you approach debugging complex issues?"
+  ],
+  "behavioral_questions": [
+    "Why do you want to join sfdf?",
+    "Tell me about a time you faced a difficult teammate.",
+    "How do you handle ambiguity and changing requirements?"
+  ]
+}

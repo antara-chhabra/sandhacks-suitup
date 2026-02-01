@@ -4,7 +4,9 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { RotateCcw, LogOut, AlertCircle } from "lucide-react";
 
-const BACKEND = "http://localhost:8000";
+const BACKEND = typeof process !== "undefined" && process.env.NEXT_PUBLIC_BACKEND_URL
+  ? process.env.NEXT_PUBLIC_BACKEND_URL
+  : "http://localhost:8000";
 
 export default function FeedbackPage() {
   const router = useRouter();
@@ -54,7 +56,12 @@ export default function FeedbackPage() {
         }
 
         const data = await res.json();
-        const text = data.feedback?.report_text || data.report_text || "Report generated.";
+        let text = data.feedback?.report_text || data.report_text || "Report generated.";
+        // Remove legacy/error lines from display
+        text = text
+          .split("\n")
+          .filter((line: string) => !line.includes("Visual analysis unavailable") && !/^Error:?/i.test(line.trim()))
+          .join("\n");
         setReport(text);
         setError(null);
       } catch (e) {
@@ -117,9 +124,10 @@ export default function FeedbackPage() {
             </div>
           )}
           <div className="w-full max-w-2xl bg-navy-800/50 border border-gold-500/20 rounded-xl overflow-hidden">
-            <div className="max-h-[60vh] overflow-y-auto p-6 font-mono text-sm text-white/90 whitespace-pre-wrap leading-relaxed">
+            <div className="max-h-[60vh] overflow-y-auto p-6 font-mono text-sm text-white/90 whitespace-pre-wrap leading-relaxed scroll-smooth">
               {report || "No report available."}
             </div>
+            <p className="text-center text-white/40 text-xs py-2 border-t border-gold-500/10">Scroll for full report</p>
           </div>
 
           <div className="flex gap-6 mt-12">

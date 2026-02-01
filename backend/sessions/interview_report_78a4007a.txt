@@ -1,0 +1,22 @@
+INTERVIEW PERFORMANCE REPORT
+============================================================
+
+Company: google
+Position: software engineer
+
+------------------------------------------------------------
+CONTENT FEEDBACK (AI Evaluation)
+------------------------------------------------------------
+Here's my evaluation:
+
+• When you asked about the AI connection failing, your initial response was "Sorry, I couldn't connect to the AI. Ollama connection failed." While it's good that you acknowledged the issue, consider expanding on what you would do next to resolve the problem or ask follow-up questions to clarify the situation.
+
+• Your answers focused mainly on apologizing and restating the issue, which didn't quite address the interviewer's concern about the AI. To improve content quality, try to pivot and provide concrete actions you would take to troubleshoot or find alternative solutions in a similar scenario.
+
+• One area for improvement is the clarity of your responses. Some answers felt a bit vague or didn't fully address the question asked. For example, when I asked "Is it running?", your response was simply "Sorry, I couldn't connect to the AI...". Consider providing more concrete information or asking follow-up questions to clarify what you mean.
+
+• One strength demonstrated in this transcript is your ability to acknowledge and apologize for an issue. This shows that you're taking responsibility and are proactive in addressing problems.
+
+Let me know if you'd like me to elaborate on any of these points!
+
+============================================================

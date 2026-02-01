@@ -54,8 +54,10 @@ export default function UploadPage() {
     formData.append("file", file);
 
     try {
-        // Connects to your FastAPI backend on port 8000
-        const response = await fetch("http://localhost:8000/process-resume", {
+        const BACKEND = typeof process !== "undefined" && process.env.NEXT_PUBLIC_BACKEND_URL
+          ? process.env.NEXT_PUBLIC_BACKEND_URL
+          : "http://localhost:8000";
+        const response = await fetch(`${BACKEND}/process-resume`, {
   method: "POST",
   body: formData,
       });
@@ -106,8 +108,8 @@ export default function UploadPage() {
         </div>
 
         {/* Upload Card */}
-        <div 
-          onClick={triggerFileInput}
+        <div
+          onClick={file ? undefined : triggerFileInput}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
@@ -127,16 +129,22 @@ export default function UploadPage() {
           />
 
           {file ? (
-            <div className="flex flex-col items-center text-center animate-pulse-once">
+            <div className="flex flex-col items-center text-center animate-pulse-once" onClick={(e) => e.stopPropagation()}>
               <CheckCircle className="w-16 h-16 text-green-500 mb-4" />
               <p className="text-xl text-white font-medium mb-2">{file.name}</p>
               <p className="text-white/40 text-sm uppercase tracking-widest">Awesome!</p>
-              <button 
-                onClick={(e) => { e.stopPropagation(); setFile(null); }}
-                className="mt-6 text-red-400 hover:text-red-300 text-sm underline z-20"
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setFile(null);
+                  if (fileInputRef.current) fileInputRef.current.value = "";
+                }}
+                className="mt-6 px-4 py-2 bg-red-500/20 border border-red-500/50 text-red-300 hover:bg-red-500/30 text-sm font-medium rounded z-20"
               >
-                Remove
+                Remove & re-upload
               </button>
+              <p className="mt-2 text-white/30 text-xs">Or drop another PDF to replace</p>
             </div>
           ) : (
             <>

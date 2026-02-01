@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "backend": "cd app/backend && uvicorn main:app --reload --port 8000"
+    "backend": "cd ../backend && uvicorn main:app --reload --port 8000"
   },
   "dependencies": {
     "lucide-react": "^0.563.0",
